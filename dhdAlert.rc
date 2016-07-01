@@ -1,0 +1,7 @@
+#include <afxres.h>
+#include "dhdres.h"
+
+
+IDR_BG HTML  "dhdRes/bg.png"
+IDR_BGREC HTML  "dhdRes/bg-rec.png"
+IDR_ICO ICON "dhdRes/dhd.ico"
