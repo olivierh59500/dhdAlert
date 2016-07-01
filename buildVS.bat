@@ -1,5 +1,7 @@
 @echo off
 
+call "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" x64
+
 mkdir %~dp0\build
 pushd %~dp0\build
 
