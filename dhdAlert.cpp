@@ -281,7 +281,7 @@ DWORD WINAPI CreateMessageBox( LPVOID lpParam) {
 
 #if DETECT_KPS
 // Is run as seperate thread and continiously consumes pressed keys to determine kps.
-DWORD WINAPI consumeKPSCounter( LPVOID lpParam) {
+DWORD WINAPI reduceKPSCounter( LPVOID lpParam) {
     while(running){
 		_sleep(100);
 		keyCounter -= KPS/10;
@@ -423,6 +423,11 @@ __declspec(dllexport) LRESULT CALLBACK handlekeys(int code, WPARAM wp, LPARAM lp
 
 		printable = (str.length() == 1) ? true : false;
 
+		// Only count the key for KPS test when it was pressed first, not held down.
+		// This prevents false positives caused by held down keys.
+		// Held down keys sitll get recorded for logging purposes.
+		bool countKey = !(GetAsyncKeyState(st_hook.vkCode) & (1 << 16));
+
 		/*
 		 * Non-printable characters only:
 		 * Some of these (namely; newline, space and tab) will be
@@ -523,16 +528,26 @@ __declspec(dllexport) LRESULT CALLBACK handlekeys(int code, WPARAM wp, LPARAM lp
 
 #if DETECT_KPS
 		// KPS check
-		keyCounter++;
-		if( !recordingKPS )
-			keyBuffer.push_back(str);
+		if(str != "" && countKey){
+			keyCounter++;
+			if( !recordingKPS )
+				keyBuffer.push_back(str);
+		}
 
-		if( keyCounter > KPS && !recording && !recordingKPS ){
+		// The keyCounter gets reduced 10 times per second.
+		// Our check for how many keys have been counted so far
+		// can be lower that way and not hit false positives.
+		// This enables the detection of smaller scripts.
+		// If the number is too low, we hit normal user keyboard 
+		// mashing. 
+		// In my tests, I could not create false positives, when
+		// checking against 15 keys counted with a KPS of 25.
+		if( keyCounter > 15 && !recording && !recordingKPS ){
 			recordingKPS = true;
 			newlogs++;
 			InvalidateRect(hwnd, NULL, FALSE);
 			// Add amount to keyCounter to increase record duration artificialy (3 secs).
-			keyCounter += 30;
+			keyCounter += KPS * 3;
 			str = "|K| New recording started: " + currentDateTime() 
 		    + " (Unhuman keystrokes per second)\n| |\n|K| ";
 		    while( keyBuffer.size() > 0 ){
@@ -550,7 +565,7 @@ __declspec(dllexport) LRESULT CALLBACK handlekeys(int code, WPARAM wp, LPARAM lp
 #endif /* DETECT_KPS */
 
 		// Check if Run Command was send.
-		if( recording ){
+		if( recording || recordingKPS ){
 			if( str == "[ENTER]\n| | " && !recordingKPS ){
 				recording = false;
 				InvalidateRect(hwnd, NULL, FALSE);
@@ -582,75 +597,38 @@ __declspec(dllexport) LRESULT CALLBACK handlekeys(int code, WPARAM wp, LPARAM lp
 		if ((str == "SHIFT" || str == "UMSCHALT") && shift){
 			shift = false;
 			str = "[SHIFT Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "") && rightshift ){
 			rightshift = false;
 			str = "[?~>RIGHT SHIFT Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "ALT") && alt ){
 			alt = false;
 			str = "[ALT Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "ALT GR") && altgr ){
 			altgr = false;
 			str = "[ALT GR Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "CTRL" || str == "STRG") && ctrl ){
 			ctrl = false;
 			str = "[CTRL Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "STRG-RECHTS") && rightctrl ){
 			rightctrl = false;
 			str = "[RIGHT CTRL Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
 		}else if( (str == "RIGHT WINDOWS" || str == "RECHTE WINDOWS" 
 		           || str == "LEFT WINDOWS" || str == "LINKE WINDOWS") 
 		           && win ){
 			win = false;
 			str = "[WINKEY Released]";
-			if( recording || recordingKPS ){
-				string pwd(cCurrentPath);
-				std::string path = pwd + "/" + OUTFILE_NAME;
-				std::ofstream outfile(path, std::ios_base::app);
-				outfile << str;
-				outfile.close();
-			}
+		}else{
+			str = "";
+		}
+		if( str != "" && !recordingKPS ){
+			keyBuffer.push_back(str);
+		}
+		if( recording || recordingKPS ){
+			string pwd(cCurrentPath);
+			std::string path = pwd + "/" + OUTFILE_NAME;
+			std::ofstream outfile(path, std::ios_base::app);
+			outfile << str;
+			outfile.close();
 		}
 	}
 
@@ -837,7 +815,7 @@ int WINAPI WinMain(HINSTANCE thisinstance, HINSTANCE previnstance,
 #if DETECT_KPS
 	// Thread running next to the main loop, reducing 
 	// the keystroke per second counter.
-	CreateThread(NULL, 0, &consumeKPSCounter, NULL, 0, NULL);
+	CreateThread(NULL, 0, &reduceKPSCounter, NULL, 0, NULL);
 #endif /* DETECT_KPS */
 	while (running) {
 		/*
